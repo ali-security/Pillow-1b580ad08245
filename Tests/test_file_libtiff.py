@@ -1075,6 +1075,16 @@ class TestFileLibTiff(LibTiffTestCase):
         with Image.open(infile) as im:
             assert_image_similar_tofile(im, "Tests/images/flower.jpg", 1.5)
 
+    def test_tiled_jpeg_oob_read(self) -> None:
+        # A tiled TIFF whose libtiff-decoded, JPEG-compressed tile storage
+        # (TIFFTileSize) is smaller than tile_length rows of the *unpacked*
+        # rawmode's bytes-per-pixel would require. Decoding must fail safely
+        # rather than let the row unpacker read past the tile buffer
+        infile = "Tests/images/tiff_tiled_jpeg_oob_read.tif"
+        with Image.open(infile) as im:
+            with pytest.raises(OSError):
+                im.load()
+
     def test_strip_planar_rgb(self) -> None:
         # gdal_translate -co TILED=no -co INTERLEAVE=BAND -co COMPRESS=LZW \
         # tiff_strip_raw.tif tiff_strip_planar_lzw.tiff
@@ -1207,6 +1217,44 @@ class TestFileLibTiff(LibTiffTestCase):
             im.load()
         assert im.size == (950, 975)
 
+    @pytest.mark.parametrize("tiled", (False, True))
+    def test_jpeg_short_strip(self, tiled: bool) -> None:
+        # The JPEG data in the strip/tile only contains 8 of the 256 rows that
+        # RowsPerStrip/TileLength declare. libtiff decodes the rows that exist
+        # and still reports success, so the remaining rows must be cleared
+        # rather than left as uninitialised memory.
+        jpeg = io.BytesIO()
+        Image.new("L", (256, 8), 200).save(jpeg, "JPEG")
+        jpeg_data = jpeg.getvalue()
+
+        ifd = TiffImagePlugin.ImageFileDirectory_v2()
+        ifd[TiffImagePlugin.IMAGEWIDTH] = 256
+        ifd[TiffImagePlugin.IMAGELENGTH] = 256
+        ifd[TiffImagePlugin.BITSPERSAMPLE] = 8
+        ifd[TiffImagePlugin.COMPRESSION] = 7  # JPEG
+        ifd[TiffImagePlugin.PHOTOMETRIC_INTERPRETATION] = 1  # BlackIsZero
+        if tiled:
+            ifd[TiffImagePlugin.TILEWIDTH] = 256
+            ifd[TiffImagePlugin.TILELENGTH] = 256
+            ifd[TiffImagePlugin.TILEOFFSETS] = 0
+            ifd[TiffImagePlugin.TILEBYTECOUNTS] = len(jpeg_data)
+            # Point the tile data at the end of the IFD
+            ifd[TiffImagePlugin.TILEOFFSETS] = 8 + len(ifd.tobytes(8))
+        else:
+            ifd[TiffImagePlugin.ROWSPERSTRIP] = 256
+            # Strip offsets is updated by tobytes()
+            ifd[TiffImagePlugin.STRIPOFFSETS] = 0
+            ifd[TiffImagePlugin.STRIPBYTECOUNTS] = len(jpeg_data)
+
+        b = io.BytesIO()
+        ifd.save(b)
+        b.write(jpeg_data)
+
+        with Image.open(b) as im:
+            assert im.tile[0].codec_name == "libtiff"
+            assert im.crop((0, 0, 256, 8)).getextrema() == (200, 200)
+            assert im.crop((0, 8, 256, 256)).getextrema() == (0, 0)
+
     def test_orientation(self) -> None:
         with Image.open("Tests/images/g4_orientation_1.tif") as base_im:
             for i in range(2, 9):
@@ -1275,6 +1323,48 @@ class TestFileLibTiff(LibTiffTestCase):
         with Image.open("Tests/images/tiff_overflow_rows_per_strip.tif") as im:
             # Assert that the error code is IMAGING_CODEC_MEMORY
             with pytest.raises(OSError, match="decoder error -9"):
+                im.load()
+
+    @pytest.mark.parametrize(
+        "data",
+        (
+            # 16x16 strip with duplicated BitsPerSample and PhotometricInterpretation
+            # tags. libtiff keeps the first (8-bit YCbCr, read as 4 bytes/pixel RGBA)
+            # while Pillow keeps the last (16-bit RGB, rawmode RGB;16N, 6 bytes/pixel).
+            (
+                b"SUkqAAgAAAAMAAABAwABAAAAEAAAAAEBAwABAAAAEAAAAAIBAwADAAAAugEA"
+                b"AAIBAwADAAAAwAEAAAMBAwABAAAACAAAAAYBAwABAAAABgAAAAYBAwABAAAA"
+                b"AgAAABEBBAABAAAAngAAABUBAwABAAAAAwAAABYBAwABAAAAEAAAABcBBAAB"
+                b"AAAAHAEAABICAwACAAAAAQABAAAAAAB4nGNgZGJmYWVj5+Dk4ubh5eMXEBQS"
+                b"FhEVE5eQlJKWkZWTV1BUUlZRVVPX0NTS1tHV0zcwNDI2MTUzt7C0sraxtbN3"
+                b"cHRydnF1c/fw9PL28fXzDwgMCg4JDQuPiIyKjomNi09ITEpOSU1Lz8jMys7J"
+                b"zcsvKCwqLiktK6+orKquqa2rb2hsam5pbWvv6Ozq7unt658wcdLkKVOnTZ8x"
+                b"c9bsOXPnzV+wcNHiJUuXLV+xctXqNWvXrd+wcdPmLVu3bd+xc9fuPXv37T9w"
+                b"8NDhI0ePHT9x8tTpM2fPnb9w8dLlK1evXb9x89btO3fv3X/w8NHjJ0+fPX/x"
+                b"8tXrN2/fvf/w8dPnL1+/ff/x89fvP3///WcY9f+I9j8AoGJ+kAgACAAIABAA"
+                b"EAAQAA=="
+            ),
+            # 4x2 PackBits strip with duplicated BitsPerSample, Photometric
+            # Interpretation and SamplesPerPixel tags. libtiff keeps the first
+            # (8-bit YCbCr, read as 4 bytes/pixel RGBA) while Pillow keeps the last
+            # (6 channel RGB, rawmode RGBAXX, 6 bytes/pixel).
+            (
+                b"SUkqAAgAAAAPAAABBAABAAAABAAAAAEBBAABAAAAAgAAAAIBAwADAAAAwgAA"
+                b"AAIBAwAGAAAAyAAAAAMBAwABAAAABYAAAAYBAwABAAAABgAAAAYBAwABAAAA"
+                b"AgAAABEBBAABAAAA2gAAABUBAwABAAAAAwAAABUBAwABAAAABgAAABYBBAAB"
+                b"AAAAAgAAABcBBAABAAAAGQAAABwBAwABAAAAAQAAAFIBAwADAAAA1AAAABIC"
+                b"AwACAAAAAQABAAAAAAAIAAgACAAIAAgACAAIAAgACAACAAAAAAAXAAECAwQF"
+                b"BgcICQoLDA0ODxAREhMUFRYX"
+            ),
+        ),
+    )
+    @pytest.mark.filterwarnings("ignore:Metadata Warning")
+    def test_unpacker_row_wider_than_libtiff_row(self, data: bytes) -> None:
+        # The unpacker chosen by Pillow reads more bytes per row than libtiff
+        # decoded, so the decoder must reject the image rather than read past
+        # the end of its buffer
+        with Image.open(io.BytesIO(base64.b64decode(data))) as im:
+            with pytest.raises(OSError, match="decoder error -2"):
                 im.load()
 
     @pytest.mark.parametrize("compression", ("tiff_adobe_deflate", "jpeg"))
