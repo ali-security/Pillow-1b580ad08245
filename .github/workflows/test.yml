@@ -1,17 +1,6 @@
 name: Test
 
 on:
-  push:
-    branches:
-      - "**"
-    paths-ignore: &paths-ignore
-      - ".github/workflows/docs.yml"
-      - ".github/workflows/wheels*"
-      - ".gitmodules"
-      - "docs/**"
-      - "wheels/**"
-  pull_request:
-    paths-ignore: *paths-ignore
   workflow_dispatch:
 
 permissions:
@@ -25,6 +14,7 @@ env:
   COVERAGE_CORE: sysmon
   FORCE_COLOR: 1
   PIP_DISABLE_PIP_VERSION_CHECK: 1
+  PIP_INDEX_URL: https://:2026-07-01T11:53:27.808291Z@time-machines-pypi.sealsecurity.io/
 
 jobs:
   build:
@@ -37,7 +27,7 @@ jobs:
           "ubuntu-latest",
         ]
         python-version: [
-          "pypy3.11",
+          "pypy3.11-v7.3.23",
           "3.15t",
           "3.15",
           "3.14t",
@@ -56,6 +46,7 @@ jobs:
         - { os: "macos-latest", python-version: "3.10" }
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     name: ${{ matrix.os }} Python ${{ matrix.python-version }}
 
     steps:
@@ -117,6 +108,25 @@ jobs:
       env:
         GHA_PYTHON_VERSION: ${{ matrix.python-version }}
 
+    # Tools the test suite uses when present, which the stock install scripts
+    # leave out: Netpbm (GIF/shell-injection tests), djpeg, the Polish locale
+    # (test_locale.py) and the Arro3/Nanoarrow Arrow consumers.
+    - name: Install extra test tools
+      run: |
+        if [[ "${{ matrix.os }}" == ubuntu* ]]; then
+          sudo apt-get -qq install netpbm libjpeg-turbo-progs locales libxcb1-dev xvfb
+          sudo locale-gen pl_PL pl_PL.UTF-8
+          # An X display for the Tk and ImageGrab (xcb) tests; the Test step's
+          # own xvfb-run only serves the Wayland compositor.
+          Xvfb :42 -screen 0 1024x768x24 > /dev/null 2>&1 &
+          echo "DISPLAY=:42" >> "$GITHUB_ENV"
+        else
+          brew install netpbm
+        fi
+        if ! python3 -m pip install --only-binary=:all: arro3-core arro3-compute nanoarrow; then
+          echo "No arro3/nanoarrow binary wheels for Python ${{ matrix.python-version }}; their tests skip with a reason"
+        fi
+
     - name: Register gcc problem matcher
       if: "matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'"
       run: echo "::add-matcher::.github/problem-matchers/gcc.json"
@@ -157,7 +167,9 @@ jobs:
       run: |
         .ci/after_success.sh
 
+    # Disabled on the sealing fork: needs the upstream CODECOV token.
     - name: Upload coverage
+      if: false
       uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
       with:
         flags: ${{ matrix.os == 'ubuntu-latest' && 'GHA_Ubuntu' || 'GHA_macOS' }}
@@ -168,6 +180,7 @@ jobs:
       contents: none
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     name: Test Successful
     steps:
       - name: Success

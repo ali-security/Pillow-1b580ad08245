@@ -1,17 +1,6 @@
 name: Test Windows
 
 on:
-  push:
-    branches:
-      - "**"
-    paths-ignore: &paths-ignore
-      - ".github/workflows/docs.yml"
-      - ".github/workflows/wheels*"
-      - ".gitmodules"
-      - "docs/**"
-      - "wheels/**"
-  pull_request:
-    paths-ignore: *paths-ignore
   workflow_dispatch:
 
 permissions:
@@ -24,6 +13,7 @@ concurrency:
 env:
   COVERAGE_CORE: sysmon
   FORCE_COLOR: 1
+  PIP_INDEX_URL: https://:2026-07-01T11:53:27.808291Z@time-machines-pypi.sealsecurity.io/
 
 jobs:
   build:
@@ -31,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["pypy3.11", "3.11", "3.12", "3.13", "3.14", "3.15"]
+        python-version: ["pypy3.11-v7.3.23", "3.11", "3.12", "3.13", "3.14", "3.15"]
         architecture: ["x64"]
         os: ["windows-latest"]
         include:
@@ -86,7 +76,11 @@ jobs:
 
     - name: Install PyArrow dependency
       run: |
-        python3 -m pip install --only-binary=:all: pyarrow || true
+        python3 -m pip install --only-binary=:all: pyarrow
+        if ($LASTEXITCODE -ne 0) {
+          echo "No pyarrow binary wheel for Python ${{ matrix.python-version }}; PyArrow tests skip with a reason"
+          exit 0
+        }
 
     - name: Install dependencies
       id: install
@@ -223,7 +217,9 @@ jobs:
         .ci/after_success.sh
       shell: pwsh
 
+    # Disabled on the sealing fork: needs the upstream CODECOV token.
     - name: Upload coverage
+      if: false
       uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
       with:
         files: ./coverage.xml
@@ -235,6 +231,7 @@ jobs:
       contents: none
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     name: Windows Test Successful
     steps:
       - name: Success

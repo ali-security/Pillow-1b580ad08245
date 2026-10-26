@@ -1,17 +1,6 @@
 name: CIFuzz
 
 on:
-  push:
-    branches:
-      - "**"
-    paths: &paths
-      - ".github/dependencies.json"
-      - ".github/workflows/cifuzz.yml"
-      - ".github/workflows/wheels-dependencies.sh"
-      - "**.c"
-      - "**.h"
-  pull_request:
-    paths: *paths
   workflow_dispatch:
 
 permissions:

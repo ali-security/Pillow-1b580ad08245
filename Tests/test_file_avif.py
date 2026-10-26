@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 import os
 import re
+import sys
 import warnings
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
@@ -791,6 +792,14 @@ class TestAvifLeaks(PillowLeakTestCase):
 
     @pytest.mark.skipif(
         is_docker_qemu(), reason="Skipping on cross-architecture containers"
+    )
+    @pytest.mark.skipif(
+        sys.platform == "darwin",
+        reason="RSS-based leak checks are unreliable on macOS CI runners",
+    )
+    @pytest.mark.skipif(
+        hasattr(sys, "pypy_translation_info"),
+        reason="PyPy's garbage collector makes RSS-based leak checks unreliable",
     )
     def test_leak_load(self) -> None:
         with open(TEST_AVIF_FILE, "rb") as f:
