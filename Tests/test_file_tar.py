@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tarfile
 import warnings
 from pathlib import Path
 
@@ -66,3 +67,30 @@ def test_contextmanager() -> None:
 
         with TarIO.TarIO(TEST_TAR_FILE, "hopper.jpg"):
             pass
+
+
+@pytest.mark.parametrize("size", (b"-1", b"-512"))
+def test_odd(tmp_path: Path, size: bytes) -> None:
+    with open(TEST_TAR_FILE, "rb") as f:
+        data = bytearray(f.read())
+
+    data[124:135] = size.rjust(11)
+
+    tmpfile = tmp_path / "temp.tar"
+    tmpfile.write_bytes(data)
+
+    with pytest.raises(ValueError, match="size must not be negative"):
+        TarIO.TarIO(str(tmpfile), "test")
+
+
+def test_zero_length_member(tmp_path: Path) -> None:
+    # A zero-length member is legal: members stored after it must still be found
+    tmpfile = tmp_path / "temp.tar"
+    with tarfile.open(tmpfile, "w") as tar:
+        tar.addfile(tarfile.TarInfo("empty.txt"))
+        tar.add("Tests/images/hopper.jpg", "hopper.jpg")
+
+    with TarIO.TarIO(str(tmpfile), "hopper.jpg") as tar:
+        with Image.open(tar) as im:
+            im.load()
+            assert im.size == (128, 128)
