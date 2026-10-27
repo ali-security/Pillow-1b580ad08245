@@ -20,6 +20,9 @@ function check_cibw_archs {
 # up the cross environment.
 PROJECTDIR=$(pwd)
 PATCH_DIR=$(pwd)/patches
+# Apply dependency patches quietly, as multibuild c893f305 does. fetch_unpack's
+# output is used as the unpacked directory name, e.g. by build_openjpeg.
+function patch { command patch --quiet "$@"; }
 if [[ "$CIBW_PLATFORM" == "ios" ]]; then
     check_cibw_archs
     # On iOS, CIBW_ARCHS is actually a multi-arch - arm64_iphoneos,
