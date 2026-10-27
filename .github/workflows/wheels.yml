@@ -1,32 +1,6 @@
 name: Wheels
 
 on:
-  schedule:
-  #        ┌───────────── minute (0 - 59)
-  #        │  ┌───────────── hour (0 - 23)
-  #        │  │ ┌───────────── day of the month (1 - 31)
-  #        │  │ │ ┌───────────── month (1 - 12 or JAN-DEC)
-  #        │  │ │ │ ┌───────────── day of the week (0 - 6 or SUN-SAT)
-  #        │  │ │ │ │
-  - cron: "42 1 * * 0,3"
-  push:
-    paths: &paths
-      - ".ci/requirements-cibw.txt"
-      - ".ci/requirements-sbom.txt"
-      - ".github/compare-dist-sizes.py"
-      - ".github/dependencies.json"
-      - ".github/embed-sbom.py"
-      - ".github/generate-sbom.py"
-      - ".github/workflows/wheels*"
-      - "pyproject.toml"
-      - "setup.py"
-      - "wheels/*"
-      - "winbuild/build_prepare.py"
-      - "winbuild/fribidi.cmake"
-    tags:
-      - "*"
-  pull_request:
-    paths: *paths
   workflow_dispatch:
 
 permissions:
@@ -39,11 +13,13 @@ concurrency:
 env:
   EXPECTED_DISTS: 87
   FORCE_COLOR: 1
+  PIP_INDEX_URL: https://:2026-07-01T11:53:27.808291Z@time-machines-pypi.sealsecurity.io/
 
 jobs:
   sbom:
     if: github.event_name != 'schedule' || github.event.repository.fork == false
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     name: Generate SBOM
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -73,43 +49,100 @@ jobs:
     if: github.event_name != 'schedule' || github.event.repository.fork == false
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    # The Intel iOS simulator legs take ~45 minutes end to end.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: "macOS 10.10 x86_64"
+          # The legs below are upstream's legs split into smaller CIBW_BUILD
+          # groups so that every job finishes well inside the build time budget.
+          - name: "macOS 10.10 x86_64 cp310"
             platform: macos
             os: macos-26-intel
             cibw_arch: x86_64
-            build: "cp3{10,11}*"
+            build: "cp310*"
             macosx_deployment_target: "10.10"
-          - name: "macOS 10.13 x86_64"
+          - name: "macOS 10.10 x86_64 cp311"
             platform: macos
             os: macos-26-intel
             cibw_arch: x86_64
-            build: "cp3{12,13}*"
+            build: "cp311*"
+            macosx_deployment_target: "10.10"
+          - name: "macOS 10.13 x86_64 cp312"
+            platform: macos
+            os: macos-26-intel
+            cibw_arch: x86_64
+            build: "cp312*"
             macosx_deployment_target: "10.13"
-          - name: "macOS 10.15 x86_64"
+          - name: "macOS 10.13 x86_64 cp313"
             platform: macos
             os: macos-26-intel
             cibw_arch: x86_64
-            build: "{cp314,cp315,pp3}*"
+            build: "cp313*"
+            macosx_deployment_target: "10.13"
+          - name: "macOS 10.15 x86_64 cp314"
+            platform: macos
+            os: macos-26-intel
+            cibw_arch: x86_64
+            build: "cp314-*"
             macosx_deployment_target: "10.15"
-          - name: "macOS arm64"
+          - name: "macOS 10.15 x86_64 cp314t"
+            platform: macos
+            os: macos-26-intel
+            cibw_arch: x86_64
+            build: "cp314t-*"
+            macosx_deployment_target: "10.15"
+          - name: "macOS 10.15 x86_64 cp315"
+            platform: macos
+            os: macos-26-intel
+            cibw_arch: x86_64
+            build: "cp315-*"
+            macosx_deployment_target: "10.15"
+          - name: "macOS 10.15 x86_64 cp315t"
+            platform: macos
+            os: macos-26-intel
+            cibw_arch: x86_64
+            build: "cp315t-*"
+            macosx_deployment_target: "10.15"
+          - name: "macOS 10.15 x86_64 PyPy"
+            platform: macos
+            os: macos-26-intel
+            cibw_arch: x86_64
+            build: "pp3*"
+            macosx_deployment_target: "10.15"
+          - name: "macOS arm64 cp310-cp313"
             platform: macos
             os: macos-latest
             cibw_arch: arm64
+            build: "{cp310,cp311,cp312,cp313}-*"
             macosx_deployment_target: "11.0"
-          - name: "manylinux_2_28 x86_64"
+          - name: "macOS arm64 cp314-cp315 PyPy"
+            platform: macos
+            os: macos-latest
+            cibw_arch: arm64
+            build: "{cp314,cp314t,cp315,cp315t,pp311}-*"
+            macosx_deployment_target: "11.0"
+          - name: "manylinux_2_28 x86_64 cp310-cp313"
             platform: linux
             os: ubuntu-latest
             cibw_arch: x86_64
-            build: "*manylinux*"
-          - name: "musllinux x86_64"
+            build: "{cp310,cp311,cp312,cp313}-*manylinux*"
+          - name: "manylinux_2_28 x86_64 cp314-cp315 PyPy"
             platform: linux
             os: ubuntu-latest
             cibw_arch: x86_64
-            build: "*musllinux*"
+            build: "{cp314,cp314t,cp315,cp315t,pp311}-*manylinux*"
+          - name: "musllinux x86_64 cp310-cp313"
+            platform: linux
+            os: ubuntu-latest
+            cibw_arch: x86_64
+            build: "{cp310,cp311,cp312,cp313}-*musllinux*"
+          - name: "musllinux x86_64 cp314-cp315"
+            platform: linux
+            os: ubuntu-latest
+            cibw_arch: x86_64
+            build: "{cp314,cp314t,cp315,cp315t}-*musllinux*"
           - name: "manylinux_2_28 aarch64"
             platform: linux
             os: ubuntu-24.04-arm
@@ -124,14 +157,36 @@ jobs:
             platform: ios
             os: macos-latest
             cibw_arch: arm64_iphoneos
-          - name: "iOS arm64 simulator"
+          - name: "iOS arm64 simulator cp313"
             platform: ios
             os: macos-latest
             cibw_arch: arm64_iphonesimulator
-          - name: "iOS x86_64 simulator"
+            build: "cp313*"
+          - name: "iOS arm64 simulator cp314"
+            platform: ios
+            os: macos-latest
+            cibw_arch: arm64_iphonesimulator
+            build: "cp314*"
+          - name: "iOS arm64 simulator cp315"
+            platform: ios
+            os: macos-latest
+            cibw_arch: arm64_iphonesimulator
+            build: "cp315*"
+          - name: "iOS x86_64 simulator cp313"
             platform: ios
             os: macos-26-intel
             cibw_arch: x86_64_iphonesimulator
+            build: "cp313*"
+          - name: "iOS x86_64 simulator cp314"
+            platform: ios
+            os: macos-26-intel
+            cibw_arch: x86_64_iphonesimulator
+            build: "cp314*"
+          - name: "iOS x86_64 simulator cp315"
+            platform: ios
+            os: macos-26-intel
+            cibw_arch: x86_64_iphonesimulator
+            build: "cp315*"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -154,7 +209,10 @@ jobs:
           CIBW_ARCHS: ${{ matrix.cibw_arch }}
           CIBW_BUILD: ${{ matrix.build }}
           CIBW_ENABLE: cpython-prerelease pypy
-          CIBW_ENVIRONMENT_PASS_LINUX: FORCE_COLOR
+          CIBW_ENVIRONMENT_PASS_LINUX: FORCE_COLOR PIP_INDEX_URL
+          # The iOS testbed does not see pyproject.toml's pytest addopts, so
+          # pass -ra explicitly to print the reason for every skipped test.
+          CIBW_TEST_COMMAND_IOS: "python -m selftest && python -m pytest -vv -x -W always -ra checks/check_wheel.py Tests"
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macosx_deployment_target }}
 
       - name: Download SBOM
@@ -174,16 +232,25 @@ jobs:
   windows:
     needs: sbom
     if: github.event_name != 'schedule' || github.event.repository.fork == false
-    name: Windows ${{ matrix.cibw_arch }}
+    name: Windows ${{ matrix.cibw_arch }}${{ matrix.group }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
           - cibw_arch: x86
             os: windows-latest
+          # AMD64 is split into two CIBW_BUILD groups so each job finishes well
+          # inside the build time budget.
           - cibw_arch: AMD64
             os: windows-latest
+            build: "{cp310,cp311,cp312,cp313}-*"
+            group: " cp310-cp313"
+          - cibw_arch: AMD64
+            os: windows-latest
+            build: "{cp314,cp314t,cp315,cp315t,pp311}-*"
+            group: " cp314-cp315 PyPy"
           - cibw_arch: ARM64
             os: windows-11-arm
     steps:
@@ -217,6 +284,24 @@ jobs:
           & python.exe winbuild\build_prepare.py -v --no-imagequant --architecture=${{ matrix.cibw_arch }}
         shell: pwsh
 
+      # The x86/AMD64 test command runs inside a Windows container; make sure the
+      # Docker daemon is up and the image is present before cibuildwheel needs it.
+      - name: Start Docker daemon
+        if: matrix.cibw_arch != 'ARM64'
+        run: |
+          Set-Service -Name docker -StartupType Automatic
+          Start-Service docker
+          for ($i = 0; $i -lt 30; $i++) {
+            docker info *> $null
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 10
+          }
+          docker version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          docker pull mcr.microsoft.com/windows/servercore:ltsc2022
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        shell: pwsh
+
       - name: Build wheels
         run: |
           for f in winbuild/build/license/*; do
@@ -233,6 +318,7 @@ jobs:
           cmd //c "winbuild\\build\\build_env.cmd && $pythonLocation\\python.exe -m cibuildwheel . --output-dir wheelhouse"
         env:
           CIBW_ARCHS: ${{ matrix.cibw_arch }}
+          CIBW_BUILD: ${{ matrix.build }}
           CIBW_BEFORE_ALL: "{package}\\winbuild\\build\\build_dep_all.cmd"
           CIBW_CACHE_PATH: "C:\\cibw"
           CIBW_ENABLE: cpython-prerelease pypy
@@ -258,10 +344,13 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: dist-windows-${{ matrix.cibw_arch }}
+          name: dist-windows-${{ matrix.cibw_arch }}${{ matrix.group }}
           path: ./wheelhouse/*.whl
 
+      # Disabled: every arch leg uploads a different fribidi.dll under the same
+      # file name, which the sealed build cannot harvest; it is not a PyPI dist.
       - name: Upload fribidi.dll
+        if: false
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fribidi-windows-${{ matrix.cibw_arch }}
@@ -270,6 +359,7 @@ jobs:
   sdist:
     if: github.event_name != 'schedule' || github.event.repository.fork == false
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
@@ -290,6 +380,7 @@ jobs:
   count-dists:
     needs: [build-native-wheels, windows, sdist]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     name: Count dists
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -308,6 +399,7 @@ jobs:
   compare-dist-sizes:
     needs: [build-native-wheels, windows, sdist]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     name: Compare dist sizes vs PyPI
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -328,9 +420,11 @@ jobs:
         run: uv run .github/compare-dist-sizes.py dist
 
   scientific-python-nightly-wheels-publish:
-    if: github.event.repository.fork == false && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    # Disabled on the sealing fork: publish-only job needing ANACONDA_ORG_UPLOAD_TOKEN.
+    if: false
     needs: count-dists
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     name: Upload wheels to scientific-python-nightly-wheels
     environment:
       name: release-anaconda
@@ -348,12 +442,11 @@ jobs:
           anaconda_nightly_upload_token: ${{ secrets.ANACONDA_ORG_UPLOAD_TOKEN }}
 
   sbom-publish:
-    if: |
-      github.event.repository.fork == false
-      && github.event_name == 'push'
-      && startsWith(github.ref, 'refs/tags')
+    # Disabled on the sealing fork: publish-only job (gh release upload).
+    if: false
     needs: [count-dists, sbom]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     name: Publish SBOM to GitHub release
     permissions:
       contents: write
@@ -369,9 +462,11 @@ jobs:
         run: gh release upload "$GITHUB_REF_NAME" pillow-*.cdx.json
 
   pypi-publish:
-    if: github.event.repository.fork == false && github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+    # Disabled on the sealing fork: publish-only job (PyPI Trusted Publishing).
+    if: false
     needs: count-dists
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     name: Upload release to PyPI
     environment:
       name: release-pypi
