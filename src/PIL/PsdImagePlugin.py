@@ -183,6 +183,7 @@ class PsdImageFile(ImageFile.ImageFile):
         self.tile = tile
         self.frame = layer
         self.fp = self._fp
+        Image.Image.seek(self, layer)
 
     def tell(self) -> int:
         # return layer number (0=image, 1..max=layers)
