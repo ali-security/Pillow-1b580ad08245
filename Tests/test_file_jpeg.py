@@ -578,6 +578,14 @@ class TestFileJpeg:
             with pytest.raises(OSError):
                 im.load()
 
+    def test_wider_than_tile(self) -> None:
+        # The decoder's scanline buffer is sized from the tile extents,
+        # so a JPEG wider than its tile must be rejected
+        with Image.open(TEST_FILE) as im:
+            im.tile = [im.tile[0]._replace(extents=(0, 0, 64, 64))]
+            with pytest.raises(OSError, match="broken data stream"):
+                im.load()
+
     @mark_if_feature_version(
         pytest.mark.valgrind_known_error, "libjpeg_turbo", "2.0", reason="Known Failing"
     )
