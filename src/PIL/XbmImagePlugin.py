@@ -37,6 +37,64 @@ xbm_head = re.compile(
 )
 
 
+# One terminated header line, and the "#define" lines xbm_head expects, in order
+_line = re.compile(rb"([^\r\n]*)[\r\n]+")
+_define = re.compile(rb"#define[ \t]+(.*)")
+_size_define = {
+    name: re.compile(rb".*_" + name + rb"[ \t]+([0-9]+)")
+    for name in (b"width", b"height")
+}
+_hotspot_define = {
+    name: re.compile(rb"[^_]*_" + name + rb"[ \t]+([0-9]+)")
+    for name in (b"x_hot", b"y_hot")
+}
+
+
+def _match_define(data: bytes, pos: int, value: re.Pattern[bytes]) -> tuple[int, int]:
+    """
+    Match one terminated "#define <name> <number>" line at pos, returning the
+    number and the position after the line's newlines, or (-1, pos) if it does
+    not match.
+    """
+    line = _line.match(data, pos)
+    if line:
+        define = _define.fullmatch(line.group(1))
+        if define:
+            number = value.fullmatch(define.group(1).lstrip(b" \t"))
+            if number:
+                return int(number.group(1)), line.end()
+    return -1, pos
+
+
+def _parse_header(
+    data: bytes,
+) -> tuple[int, int, tuple[int, int] | None, int] | None:
+    """
+    Accept the same headers as xbm_head, one line at a time, so that the
+    overlapping quantifiers in xbm_head cannot backtrack across the whole header.
+    """
+    pos = len(data) - len(data.lstrip())
+    width, pos = _match_define(data, pos, _size_define[b"width"])
+    if width < 0:
+        return None
+    height, pos = _match_define(data, pos, _size_define[b"height"])
+    if height < 0:
+        return None
+
+    hotspot = None
+    x_hot, hot_pos = _match_define(data, pos, _hotspot_define[b"x_hot"])
+    if x_hot >= 0:
+        y_hot, hot_pos = _match_define(data, hot_pos, _hotspot_define[b"y_hot"])
+        if y_hot >= 0:
+            hotspot = x_hot, y_hot
+            pos = hot_pos
+
+    bits = data.rfind(b"_bits[]", pos)
+    if bits < 0:
+        return None
+    return width, height, hotspot, bits + len(b"_bits[]")
+
+
 def _accept(prefix: bytes) -> bool:
     return prefix.lstrip().startswith(b"#define")
 
@@ -52,22 +110,21 @@ class XbmImageFile(ImageFile.ImageFile):
     def _open(self) -> None:
         assert self.fp is not None
 
-        m = xbm_head.match(self.fp.read(512))
+        header = _parse_header(self.fp.read(512))
 
-        if not m:
+        if not header:
             msg = "not a XBM file"
             raise SyntaxError(msg)
 
-        xsize = int(m.group("width"))
-        ysize = int(m.group("height"))
+        xsize, ysize, hotspot, offset = header
 
-        if m.group("hotspot"):
-            self.info["hotspot"] = (int(m.group("xhot")), int(m.group("yhot")))
+        if hotspot:
+            self.info["hotspot"] = hotspot
 
         self._mode = "1"
         self._size = xsize, ysize
 
-        self.tile = [ImageFile._Tile("xbm", (0, 0) + self.size, m.end())]
+        self.tile = [ImageFile._Tile("xbm", (0, 0) + self.size, offset)]
 
 
 def _save(im: Image.Image, fp: IO[bytes], filename: str | bytes) -> None:
