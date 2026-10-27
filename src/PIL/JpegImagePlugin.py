@@ -787,6 +787,9 @@ def _save(im: Image.Image, fp: IO[bytes], filename: str | bytes) -> None:
             i += 1
 
     comment = info.get("comment", im.info.get("comment"))
+    if comment and len(comment) > MAX_BYTES_IN_MARKER:
+        msg = "Comment is too long"
+        raise ValueError(msg)
 
     # "progressive" is the official name, but older documentation
     # says "progression"
@@ -837,10 +840,13 @@ def _save(im: Image.Image, fp: IO[bytes], filename: str | bytes) -> None:
             bufsize += len(exif) + 5
         if extra:
             bufsize += len(extra) + 1
+        if comment:
+            bufsize += len(comment) + 5
     else:
         # The EXIF info needs to be written as one block, + APP1, + one spare byte.
-        # Ensure that our buffer is big enough. Same with the icc_profile block.
-        bufsize = max(len(exif) + 5, len(extra) + 1)
+        # Ensure that our buffer is big enough. Same with the icc_profile block
+        # and the comment (COM marker).
+        bufsize = max(len(exif) + 5, len(extra) + 1, len(comment or b"") + 5)
 
     ImageFile._save(
         im, fp, [ImageFile._Tile("jpeg", (0, 0) + im.size, 0, rawmode)], bufsize
