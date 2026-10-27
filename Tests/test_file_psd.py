@@ -115,6 +115,17 @@ def test_seek_tell() -> None:
     assert layer_number == 2
 
 
+def test_seek_mode_change() -> None:
+    with Image.open(test_file) as im:
+        im.load()
+        assert im.mode == "RGB"
+
+        # Assert that C image is cleared after mode change
+        im.seek(2)
+        assert im.mode == "RGBA"
+        assert im._im is None
+
+
 def test_seek_eoferror() -> None:
     with Image.open(test_file) as im:
         with pytest.raises(EOFError):
