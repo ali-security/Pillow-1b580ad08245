@@ -3297,7 +3297,7 @@ def frombytes(
 def frombuffer(
     mode: str,
     size: tuple[int, int],
-    data: bytes | SupportsArrayInterface,
+    data: bytes | bytearray | SupportsArrayInterface,
     decoder_name: str = "raw",
     *args: Any,
 ) -> Image:
