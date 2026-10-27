@@ -7,6 +7,8 @@ import pytest
 
 from PIL import Image, ImageSequence, PngImagePlugin
 
+from .helper import assert_image_equal
+
 
 # APNG browser support tests and fixtures via:
 # https://philip.html5.org/tests/apng/tests.html
@@ -125,6 +127,25 @@ def test_apng_dispose_region() -> None:
         assert im.getpixel((64, 32)) == (0, 255, 0, 255)
 
 
+@pytest.mark.parametrize(
+    "path",
+    (
+        "Tests/images/iss634.apng",
+        "Tests/images/apng/dispose_op_previous.png",
+        "Tests/images/apng/dispose_op_previous_region.png",
+    ),
+)
+def test_apng_load_each_frame(path: str) -> None:
+    # Loading every frame in turn must give the same frames as seeking to each
+    # one directly, including frames that restore the previous canvas
+    with Image.open(path) as im:
+        frames = [frame.copy() for frame in ImageSequence.Iterator(im)]
+    for i, frame in enumerate(frames):
+        with Image.open(path) as im:
+            im.seek(i)
+            assert_image_equal(frame, im)
+
+
 def test_apng_dispose_op_previous_frame() -> None:
     # Test that the dispose settings being used are from the previous frame
     #
@@ -156,6 +177,33 @@ def test_apng_dispose_op_background_p_mode() -> None:
         im.seek(1)
         im.load()
         assert im.size == (128, 64)
+
+
+def test_apng_dispose_op_background_decompression_bomb() -> None:
+    o16 = PngImagePlugin.o16
+    o32 = PngImagePlugin.o32
+
+    b = BytesIO()
+    b.write(PngImagePlugin._MAGIC)
+    PngImagePlugin.putchunk(b, b"IHDR", o32(2**31 - 1), o32(1), b"\x08\x06\x00\x00\x00")
+    PngImagePlugin.putchunk(b, b"acTL", o32(2), o32(0))
+    PngImagePlugin.putchunk(
+        b,
+        b"fcTL",
+        o32(0),
+        o32(1),
+        o32(1),
+        o32(0),
+        o32(0),
+        o16(1),
+        o16(10),
+        bytes([PngImagePlugin.Disposal.OP_BACKGROUND, PngImagePlugin.Blend.OP_SOURCE]),
+    )
+    PngImagePlugin.putchunk(b, b"IDAT")
+    PngImagePlugin.putchunk(b, b"IEND")
+
+    with pytest.raises(Image.DecompressionBombError):
+        Image.open(b)
 
 
 def test_apng_blend() -> None:

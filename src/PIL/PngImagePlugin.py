@@ -882,7 +882,6 @@ class PngImageFile(ImageFile.ImageFile):
         if isinstance(self._fp, DeferredError):
             raise self._fp.ex
 
-        self.dispose: _imaging.ImagingCore | None
         dispose_extent = None
         if frame == 0:
             if rewind:
@@ -893,8 +892,7 @@ class PngImageFile(ImageFile.ImageFile):
                 self.info = self.png.im_info
                 self.tile = self.png.im_tile
                 self.fp = self._fp
-            self._prev_im = None
-            self.dispose = None
+            self._prev_im: _imaging.ImagingCore | None = None
             self.default_image = self.info.get("default_image", False)
             self.dispose_op = self.info.get("disposal")
             self.blend_op = self.info.get("blend")
@@ -905,11 +903,19 @@ class PngImageFile(ImageFile.ImageFile):
                 msg = f"cannot seek to frame {frame}"
                 raise ValueError(msg)
 
+            if self.dispose_op == Disposal.OP_BACKGROUND:
+                x0, y0, x1, y1 = self.dispose_extent
+                dispose = Image.core.fill(self.mode, (x1 - x0, y1 - y0))
+            elif self.dispose_op == Disposal.OP_PREVIOUS:
+                dispose = self._dispose_previous
+            else:
+                dispose = None
+
             # ensure previous frame was loaded
             self.load()
 
-            if self.dispose:
-                self.im.paste(self.dispose, self.dispose_extent)
+            if dispose:
+                self.im.paste(dispose, self.dispose_extent)
             self._prev_im = self.im.copy()
 
             self.fp = self._fp
@@ -968,14 +974,13 @@ class PngImageFile(ImageFile.ImageFile):
         if self._prev_im is None and self.dispose_op == Disposal.OP_PREVIOUS:
             self.dispose_op = Disposal.OP_BACKGROUND
 
-        self.dispose = None
-        if self.dispose_op == Disposal.OP_PREVIOUS:
-            if self._prev_im:
-                self.dispose = self._prev_im.copy()
-                self.dispose = self._crop(self.dispose, self.dispose_extent)
-        elif self.dispose_op == Disposal.OP_BACKGROUND:
-            self.dispose = Image.core.fill(self.mode, self.size)
-            self.dispose = self._crop(self.dispose, self.dispose_extent)
+        # OP_PREVIOUS restores the canvas as it was before this frame is drawn.
+        # Keep that region now, as load_end() draws this frame onto _prev_im.
+        self._dispose_previous: _imaging.ImagingCore | None = (
+            self._crop(self._prev_im, self.dispose_extent)
+            if self.dispose_op == Disposal.OP_PREVIOUS and self._prev_im is not None
+            else None
+        )
 
     def tell(self) -> int:
         return self.__frame
