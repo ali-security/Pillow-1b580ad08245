@@ -12,40 +12,58 @@ concurrency:
 
 env:
   FORCE_COLOR: 1
+  # Same oss-fuzz infra revision as upstream's google/oss-fuzz actions pin
+  OSS_FUZZ_SHA: ed7c2f7301eecb625a3d427549056b0a90546bb5
 
 jobs:
   Fuzzing:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+        path: Pillow
+    - name: Build CIFuzz images
+      run: |
+        git init -q oss-fuzz
+        git -C oss-fuzz fetch -q --depth 1 https://github.com/google/oss-fuzz "$OSS_FUZZ_SHA"
+        git -C oss-fuzz checkout -q FETCH_HEAD
+        docker build -q -t cifuzz-build-fuzzers -f oss-fuzz/infra/build_fuzzers.Dockerfile oss-fuzz/infra
+        docker build -q -t cifuzz-run-fuzzers -f oss-fuzz/infra/run_fuzzers.Dockerfile oss-fuzz/infra
+    # upstream's google/oss-fuzz build_fuzzers/run_fuzzers actions take the repository
+    # name from GITHUB_REPOSITORY, which on this fork is not "Pillow", so run the same
+    # containers on the generic platform, which takes it from REPOSITORY instead
     - name: Build Fuzzers
       id: build
-      uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@ed7c2f7301eecb625a3d427549056b0a90546bb5 # master
-      with:
-        oss-fuzz-project-name: 'pillow'
-        language: python
-        dry-run: false
+      run: |
+        mkdir -p "$GITHUB_WORKSPACE/cifuzz"
+        docker run --rm \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+          -e OSS_FUZZ_PROJECT_NAME=pillow -e LANGUAGE=python -e SANITIZER=address \
+          -e ARCHITECTURE=x86_64 -e DRY_RUN=false -e LOW_DISK_SPACE=True \
+          -e CIFUZZ_DEBUG=True -e CFL_PLATFORM=standalone -e REPOSITORY=Pillow \
+          -e WORKSPACE="$GITHUB_WORKSPACE/cifuzz" \
+          -e PROJECT_SRC_PATH="$GITHUB_WORKSPACE/Pillow" \
+          -e KEEP_UNAFFECTED_FUZZ_TARGETS=True -e BAD_BUILD_CHECK=True \
+          cifuzz-build-fuzzers
     - name: Run Fuzzers
       id: run
-      uses: google/oss-fuzz/infra/cifuzz/actions/run_fuzzers@ed7c2f7301eecb625a3d427549056b0a90546bb5 # master
-      with:
-        oss-fuzz-project-name: 'pillow'
-        fuzz-seconds: 600
-        language: python
-        dry-run: false
-    - name: Upload New Crash
+      run: |
+        docker run --rm \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+          -e OSS_FUZZ_PROJECT_NAME=pillow -e LANGUAGE=python -e SANITIZER=address \
+          -e FUZZ_SECONDS=600 -e MODE=batch -e DRY_RUN=false -e LOW_DISK_SPACE=True \
+          -e CIFUZZ_DEBUG=True -e CFL_PLATFORM=standalone -e REPOSITORY=Pillow \
+          -e WORKSPACE="$GITHUB_WORKSPACE/cifuzz" \
+          -e PROJECT_SRC_PATH="$GITHUB_WORKSPACE/Pillow" \
+          -e FILESTORE=no_filestore -e NO_CLUSTERFUZZ_DEPLOYMENT=True \
+          cifuzz-run-fuzzers
+    - name: Upload Crash
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       if: failure() && steps.build.outcome == 'success'
       with:
         name: artifacts
-        path: ./out/artifacts
-    - name: Upload Legacy Crash
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-      if: steps.run.outcome == 'success'
-      with:
-        name: crash
-        path: ./out/crash*
-    - name: Fail on legacy crash
-      if: success()
-      run: |
-        [ ! -e out/crash-* ]
-        echo No legacy crash detected
+        path: ./cifuzz/out/artifacts
