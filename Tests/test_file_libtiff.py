@@ -757,6 +757,21 @@ class TestFileLibTiff(LibTiffTestCase):
         save_bytesio("packbits")
         save_bytesio("tiff_lzw")
 
+    def test_save_bytesio_encoder_error(self) -> None:
+        # libtiff rejects a floating point predictor for integer sample data,
+        # so TIFFWriteScanline fails. The encoder must not free its in-memory
+        # buffer while the TIFF handle is still open, as closing the handle
+        # flushes buffered bytes back through the write callback.
+        im = hopper("L")
+        buffer_io = io.BytesIO()
+        with pytest.raises(OSError):
+            im.save(
+                buffer_io,
+                format="tiff",
+                compression="tiff_lzw",
+                tiffinfo={TiffImagePlugin.PREDICTOR: 3},
+            )
+
     def test_save_ycbcr(self, tmp_path: Path) -> None:
         im = hopper("YCbCr")
         outfile = tmp_path / "temp.tif"
@@ -1267,6 +1282,19 @@ class TestFileLibTiff(LibTiffTestCase):
         out = tmp_path / "temp.tif"
         with pytest.raises(ValueError, match="cannot write empty image"):
             im.save(out, compression=compression)
+
+    def test_save_error_cleanup(self, tmp_path: Path) -> None:
+        with open(tmp_path / "temp.tif", "wb") as fp:
+            im = Image.new("RGB", (0, 0))
+            with pytest.raises(ValueError, match="cannot write empty image") as exc:
+                im.save(fp, compression="jpeg")
+
+            # The traceback keeps the encoder alive. Collecting it used to move
+            # the file position, corrupting unrelated reads if the fd was reused.
+            # Cleanup must happen during save, not later during GC.
+            fp.seek(1234)
+            del exc
+            assert fp.tell() == 1234
 
     def test_save_many_compressed(self, tmp_path: Path) -> None:
         im = hopper()
