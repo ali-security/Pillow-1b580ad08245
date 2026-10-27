@@ -256,7 +256,7 @@ ImagingFillBand(Imaging imOut, int band, int color) {
 Imaging
 ImagingMerge(const ModeID mode, Imaging bands[4]) {
     int i, x, y;
-    int bandsCount = 0;
+    int bandsCount;
     Imaging imOut;
     Imaging firstBand;
 
@@ -265,11 +265,13 @@ ImagingMerge(const ModeID mode, Imaging bands[4]) {
         return (Imaging)ImagingError_ValueError("wrong number of bands");
     }
 
-    for (i = 0; i < 4; ++i) {
-        if (!bands[i]) {
+    for (bandsCount = 0; bandsCount < 4; ++bandsCount) {
+        if (!bands[bandsCount]) {
             break;
         }
-        if (bands[i]->bands != 1) {
+    }
+    for (i = 0; i < bandsCount; ++i) {
+        if (bands[i]->bands != 1 || (bandsCount != 1 && bands[i]->pixelsize == 4)) {
             return (Imaging)ImagingError_ModeError();
         }
         if (bands[i]->xsize != firstBand->xsize ||
@@ -277,7 +279,6 @@ ImagingMerge(const ModeID mode, Imaging bands[4]) {
             return (Imaging)ImagingError_Mismatch();
         }
     }
-    bandsCount = i;
 
     imOut = ImagingNewDirty(mode, firstBand->xsize, firstBand->ysize);
     if (!imOut) {
@@ -289,7 +290,7 @@ ImagingMerge(const ModeID mode, Imaging bands[4]) {
         return (Imaging)ImagingError_ValueError("wrong number of bands");
     }
 
-    if (imOut->bands == 1) {
+    if (bandsCount == 1) {
         return ImagingCopy2(imOut, firstBand);
     }
 
