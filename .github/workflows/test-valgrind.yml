@@ -3,15 +3,6 @@ name: Test Valgrind
 # like the Docker tests, but running valgrind only on *.c/*.h changes.
 
 on:
-  push:
-    branches:
-      - "**"
-    paths: &paths
-      - ".github/workflows/test-valgrind.yml"
-      - "**.c"
-      - "**.h"
-  pull_request:
-    paths: *paths
   workflow_dispatch:
 
 permissions:
@@ -35,8 +26,9 @@ jobs:
           ubuntu-22.04-jammy-amd64-valgrind,
         ]
         dockerTag: [main]
+        shard: [1, 2, 3, 4, 5, 6]
 
-    name: ${{ matrix.docker }}
+    name: ${{ matrix.docker }} ${{ matrix.shard }}
 
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -54,5 +46,5 @@ jobs:
       run: |
         # The Pillow user in the docker container is UID 1001
         sudo chown -R 1001 $GITHUB_WORKSPACE
-        docker run --name pillow_container -e "PILLOW_VALGRIND_TEST=true" -v $GITHUB_WORKSPACE:/Pillow pythonpillow/${{ matrix.docker }}:${{ matrix.dockerTag }}
+        docker run --name pillow_container -e "PILLOW_VALGRIND_TEST=true" -v $GITHUB_WORKSPACE:/Pillow pythonpillow/${{ matrix.docker }}:${{ matrix.dockerTag }} bash /Pillow/.github/workflows/valgrind-shard.sh memcheck ${{ matrix.shard }} 6
         sudo chown -R runner $GITHUB_WORKSPACE

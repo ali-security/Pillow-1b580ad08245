@@ -217,6 +217,12 @@ def mark_if_feature_version(
 
 
 @pytest.mark.skipif(sys.platform.startswith("win32"), reason="Requires Unix or macOS")
+# Per https://stackoverflow.com/a/29007723/51685, due to JIT compilation,
+# RSS utilization is known to grow in PyPy.
+@pytest.mark.skipif(
+    hasattr(sys, "pypy_translation_info"),
+    reason="max RSS utilization is not stable on PyPy",
+)
 class PillowLeakTestCase:
     # requires unix/macOS
     iterations = 100  # count
@@ -240,6 +246,10 @@ class PillowLeakTestCase:
         return mem / 1024 if sys.platform == "darwin" else mem
 
     def _test_leak(self, core: Callable[[], None]) -> None:
+        # Warm up so allocator arenas, caches, etc. are allocated,
+        # before taking the baseline measurement.
+        core()
+
         start_mem = self._get_mem_usage()
         for cycle in range(self.iterations):
             core()

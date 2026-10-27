@@ -1,15 +1,6 @@
 name: Docs
 
 on:
-  push:
-    branches:
-      - "**"
-    paths: &paths
-      - ".github/workflows/docs.yml"
-      - "docs/**"
-      - "src/PIL/**"
-  pull_request:
-    paths: *paths
   workflow_dispatch:
 
 permissions:

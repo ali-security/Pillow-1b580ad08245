@@ -4,20 +4,6 @@ name: Test Valgrind Memory Leaks
 
 # this is very expensive. Only run on the pull request.
 on:
-  # push:
-  #   branches:
-  #     - "**"
-  #   paths:
-  #     - ".github/workflows/test-valgrind-memory.yml"
-  #     - "**.c"
-  #     - "**.h"
-  #     - "depends/docker-test-valgrind-memory.sh"
-  pull_request:
-    paths:
-      - ".github/workflows/test-valgrind-memory.yml"
-      - "**.c"
-      - "**.h"
-      - "depends/docker-test-valgrind-memory.sh"
   workflow_dispatch:
 
 permissions:
@@ -41,8 +27,9 @@ jobs:
           ubuntu-22.04-jammy-amd64-valgrind,
         ]
         dockerTag: [main]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
-    name: ${{ matrix.docker }}
+    name: ${{ matrix.docker }} ${{ matrix.shard }}
 
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -60,5 +47,5 @@ jobs:
       run: |
         # The Pillow user in the docker container is UID 1001
         sudo chown -R 1001 $GITHUB_WORKSPACE
-        docker run --name pillow_container -e "PILLOW_VALGRIND_TEST=true" -v $GITHUB_WORKSPACE:/Pillow pythonpillow/${{ matrix.docker }}:${{ matrix.dockerTag }} /Pillow/depends/docker-test-valgrind-memory.sh
+        docker run --name pillow_container -e "PILLOW_VALGRIND_TEST=true" -v $GITHUB_WORKSPACE:/Pillow pythonpillow/${{ matrix.docker }}:${{ matrix.dockerTag }} bash /Pillow/.github/workflows/valgrind-shard.sh leak ${{ matrix.shard }} 12
         sudo chown -R runner $GITHUB_WORKSPACE
