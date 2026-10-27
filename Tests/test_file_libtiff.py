@@ -598,7 +598,9 @@ class TestFileLibTiff(LibTiffTestCase):
         im.save(out, compression="tiff_adobe_deflate")
         assert_image_equal_tofile(im, out)
 
-    @pytest.mark.parametrize("im", (hopper("P"), Image.new("P", (1, 1), "#000")))
+    @pytest.mark.parametrize(
+        "im", (hopper("P"), hopper("PA"), Image.new("P", (1, 1), "#000"))
+    )
     def test_palette_save(
         self, im: Image.Image, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -611,6 +613,34 @@ class TestFileLibTiff(LibTiffTestCase):
             # colormap/palette tag
             assert isinstance(reloaded, TiffImagePlugin.TiffImageFile)
             assert len(reloaded.tag_v2[320]) == 768
+            assert_image_equal(im.convert("RGB"), reloaded.convert("RGB"))
+
+    @pytest.mark.parametrize("libtiff", (True, False))
+    def test_colormap_size_mismatch(
+        self, monkeypatch: pytest.MonkeyPatch, libtiff: bool
+    ) -> None:
+        # The number of colormap entries per plane must match 1 << BitsPerSample.
+        monkeypatch.setattr(TiffImagePlugin, "WRITE_LIBTIFF", libtiff)
+        im = Image.new("I;16", (1, 1))
+
+        with pytest.raises(ValueError, match="Requiring 196608 items for Colormap"):
+            im.save(
+                io.BytesIO(),
+                format="TIFF",
+                tiffinfo={TiffImagePlugin.COLORMAP: (0,)},
+            )
+
+        # A correctly sized Colormap for a 16-bit image is still accepted.
+        colormap = tuple(range(1 << 16)) * 3
+        out = io.BytesIO()
+        im.save(
+            out,
+            format="TIFF",
+            tiffinfo={TiffImagePlugin.COLORMAP: colormap},
+        )
+        with Image.open(out) as reloaded:
+            assert isinstance(reloaded, TiffImagePlugin.TiffImageFile)
+            assert reloaded.tag_v2[TiffImagePlugin.COLORMAP] == colormap
 
     @pytest.mark.parametrize("compression", ("tiff_ccitt", "group3", "group4"))
     def test_bw_compression_w_rgb(self, compression: str, tmp_path: Path) -> None:
