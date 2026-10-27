@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from PIL import Image, XbmImagePlugin
+from PIL import Image, UnidentifiedImageError, XbmImagePlugin
 
-from .helper import hopper
+from .helper import hopper, timeout_unless_slower_valgrind
 
 PIL151 = b"""
 #define basic_width 32
@@ -52,6 +52,12 @@ def test_open() -> None:
         assert im.size == (128, 128)
 
 
+def test_unterminated_comment() -> None:
+    b = BytesIO(b"/* unterminated\n" + PIL151)
+    with pytest.raises(UnidentifiedImageError):
+        Image.open(b)
+
+
 def test_open_filename_with_underscore() -> None:
     # Arrange
     # Created with `convert hopper.png hopper_underscore.xbm`
@@ -88,3 +94,50 @@ def test_hotspot(tmp_path: Path) -> None:
 
     with Image.open(out) as reloaded:
         assert reloaded.info["hotspot"] == hotspot
+
+
+@timeout_unless_slower_valgrind(1)
+def test_redos() -> None:
+    redos = b""
+    for prop in (b"width", b"height", b"x_hot", b"y_hot"):
+        redos += b"#define" + b" " * 60 + b"_" + prop + b" 1\r"
+    redos += b"\r" * 60 + b"_bits" + b"A" * 512
+
+    b = BytesIO(redos)
+    with pytest.raises(SyntaxError):
+        XbmImagePlugin.XbmImageFile(b)
+
+
+@pytest.mark.parametrize(
+    "header",
+    (
+        PIL151,
+        b"#define " + b"n" * 100 + b"_width 8\n#define " + b"n" * 100 + b"_height 1\n"
+        b"static unsigned char " + b"n" * 100 + b"_bits[] = {\n0x00 };\n",
+        b"#define\tim_width\t8\n#define\tim_height\t1\nstatic char im_bits[] = {",
+        b"  \n\t#define im_width 8\n#define im_height 1\nstatic char im_bits[] = {",
+        b"#define im_width 8\r#define im_height 1\rstatic char im_bits[] = {",
+        b"#define im_width 8\r\n\r\n#define im_height 1\r\nstatic char im_bits[] = {",
+        b"#define im_width 8\n#define im_height 1\n#define im_x_hot 2\n"
+        b"#define im_y_hot 3\nstatic char im_bits[] = {",
+        b"#define im_width 8\n#define im_height 1\n#define im_x_hot 2\n"
+        b"static char im_bits[] = {",
+        b"#define im_width 8\n#define im_height 1\nstatic char a_bits[] b_bits[] = {",
+        b"#define im_width 8 \n#define im_height 1\nstatic char im_bits[] = {",
+        b"#define im_width 8\n #define im_height 1\nstatic char im_bits[] = {",
+        b"#define im_width 8\n#define im_height 1\nstatic char im[] = {",
+        b"#define im_width 8",
+        b"/* comment */\n#define im_width 8\n#define im_height 1\nstatic char im_bits[] = {",
+    ),
+)
+def test_header_matches_xbm_head(header: bytes) -> None:
+    # The header parser accepts what the xbm_head regular expression accepted
+    data = header[:512]
+    m = XbmImagePlugin.xbm_head.match(data)
+    expected = None
+    if m:
+        hotspot = None
+        if m.group("hotspot"):
+            hotspot = (int(m.group("xhot")), int(m.group("yhot")))
+        expected = (int(m.group("width")), int(m.group("height")), hotspot, m.end())
+    assert XbmImagePlugin._parse_header(data) == expected
